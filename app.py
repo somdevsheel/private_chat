@@ -5,6 +5,9 @@ import re
 import hashlib
 from datetime import datetime
 
+# Ensure required directories exist
+os.makedirs(os.path.dirname(os.path.abspath(__file__)), exist_ok=True)
+
 # Set page config
 st.set_page_config(page_title="Chat App", page_icon="💬", layout="wide")
 
@@ -35,27 +38,31 @@ def generate_user_id(email):
 
 def register_user(email):
     """Register a new user or return existing user info"""
-    user_id = generate_user_id(email)
-    
-    # Check if users file exists
-    if os.path.exists(USERS_FILE):
-        users_df = pd.read_csv(USERS_FILE)
-        # Check if user already exists
-        if email in users_df['email'].values:
-            return user_id, False  # User exists
-    else:
-        users_df = pd.DataFrame(columns=['email', 'user_id', 'first_login'])
-    
-    # Add new user
-    new_user = {
-        'email': email,
-        'user_id': user_id,
-        'first_login': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-    users_df = pd.concat([users_df, pd.DataFrame([new_user])], ignore_index=True)
-    users_df.to_csv(USERS_FILE, index=False)
-    
-    return user_id, True  # New user
+    try:
+        user_id = generate_user_id(email)
+        
+        # Check if users file exists
+        if os.path.exists(USERS_FILE):
+            users_df = pd.read_csv(USERS_FILE)
+            # Check if user already exists
+            if email in users_df['email'].values:
+                return user_id, False  # User exists
+        else:
+            users_df = pd.DataFrame(columns=['email', 'user_id', 'first_login'])
+        
+        # Add new user
+        new_user = {
+            'email': email,
+            'user_id': user_id,
+            'first_login': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        users_df = pd.concat([users_df, pd.DataFrame([new_user])], ignore_index=True)
+        users_df.to_csv(USERS_FILE, index=False)
+        
+        return user_id, True  # New user
+    except Exception as e:
+        st.error(f"Error registering user: {e}")
+        return None, False
 
 def get_user_display_name(email):
     """Get a display name for the user"""
@@ -85,22 +92,27 @@ def load_messages():
 
 def save_message(email, user_id, message, recipient="everyone"):
     """Save a new message to CSV file with user verification"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_row = {
-        'timestamp': timestamp,
-        'email': email,
-        'user_id': user_id,
-        'message': message,
-        'recipient': recipient
-    }
-    
-    if os.path.exists(CHAT_FILE):
-        df = pd.read_csv(CHAT_FILE)
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-    else:
-        df = pd.DataFrame([new_row])
-    
-    df.to_csv(CHAT_FILE, index=False)
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_row = {
+            'timestamp': timestamp,
+            'email': email,
+            'user_id': user_id,
+            'message': message,
+            'recipient': recipient
+        }
+        
+        if os.path.exists(CHAT_FILE):
+            df = pd.read_csv(CHAT_FILE)
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        else:
+            df = pd.DataFrame([new_row])
+        
+        df.to_csv(CHAT_FILE, index=False)
+        return True
+    except Exception as e:
+        st.error(f"Error saving message: {e}")
+        return False
 
 def get_filtered_messages(user_email):
     """Get messages that the current user should see"""
@@ -220,18 +232,22 @@ def main():
         
         if st.button("Join Chat"):
             if email and is_valid_email(email):
-                user_id, is_new_user = register_user(email)
-                st.session_state.logged_in = True
-                st.session_state.user_email = email
-                st.session_state.user_id = user_id
-                st.session_state.messages = load_messages()
-                
-                if is_new_user:
-                    st.success(f"Welcome! Your unique ID is: {user_id}")
+                result = register_user(email)
+                if result[0] is not None:
+                    user_id, is_new_user = result
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = email
+                    st.session_state.user_id = user_id
+                    st.session_state.messages = load_messages()
+                    
+                    if is_new_user:
+                        st.success(f"Welcome! Your unique ID is: {user_id}")
+                    else:
+                        st.success(f"Welcome back! Your ID is: {user_id}")
+                    
+                    st.rerun()
                 else:
-                    st.success(f"Welcome back! Your ID is: {user_id}")
-                
-                st.rerun()
+                    st.error("Failed to register user. Please try again.")
             else:
                 st.error("Please enter a valid email address.")
     
@@ -300,21 +316,25 @@ def main():
             
             if submit_button:
                 if message.strip():
-                    save_message(
+                    success = save_message(
                         st.session_state.user_email, 
                         st.session_state.user_id, 
                         message.strip(),
                         selected_recipient
                     )
-                    st.session_state.messages = load_messages()
                     
-                    if selected_recipient == "everyone":
-                        st.success("Public message sent!")
+                    if success:
+                        st.session_state.messages = load_messages()
+                        
+                        if selected_recipient == "everyone":
+                            st.success("Public message sent!")
+                        else:
+                            recipient_name = get_user_display_name(selected_recipient)
+                            st.success(f"Private message sent to {recipient_name}!")
+                        
+                        st.rerun()
                     else:
-                        recipient_name = get_user_display_name(selected_recipient)
-                        st.success(f"Private message sent to {recipient_name}!")
-                    
-                    st.rerun()
+                        st.error("Failed to send message. Please try again.")
                 else:
                     st.error("Please enter a message.")
 
